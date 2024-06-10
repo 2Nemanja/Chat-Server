@@ -51,13 +51,13 @@ void Client::Receiver(int client_fd)
             {
                 if (bytesReceived == 0) {
                     cout << "Server disconnected" << endl;
-                    close       (client_fd);
-                    exit        (EXIT_FAILURE);
+                    close(client_fd);
+                    exit(EXIT_FAILURE);
                 }
                 else {
                     cerr << "Receive error: " << strerror(errno) << endl;
                 }
-                close           (client_fd);
+                close(client_fd);
                 break;
             }
             buffer[bytesReceived] = '\0';
@@ -84,19 +84,19 @@ void Client::communicate(int client_fd)
                 cerr << "Failed to send message: " << strerror(errno) << endl;
                 break;
             }
-            if(message == private_trigger) {
-                cout << "Who do u wana write to?" << endl;
+           if (string(message) == private_trigger) {
+                cout << "Who do you want to write to?" << endl;
                 cin.getline(target_username, sizeof(target_username));
-                if (send(client_fd, target_username, sizeof(target_username), 0) == -1) {
-                    cerr << "Failed to send target username to server..." << endl;
-                }
-                
                 cout << "Say something to " << target_username << " : ";
                 cin.getline(private_message, sizeof(private_message));
-                if (send(client_fd, private_message, sizeof(private_message), 0) == - 1) {
-                    cerr << "Failed to send a private message to " << target_username << endl;
+                string combo_private_message = string(target_username) + " : " + string(private_message);
+                cout << combo_private_message << endl;
+                if (send(client_fd, combo_private_message.c_str(), combo_private_message.length(), 0) == -1) {
+                    cerr << "Failed to send a private message to " << combo_private_message << endl;
+                    break;
                 }
             }
+            continue;
         }
     }
     catch (const exception e) {

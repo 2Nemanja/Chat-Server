@@ -169,9 +169,38 @@ void   Server::handleClientMessages(int client_fd) {
 
             if (strcmp(received_message.c_str(), private_trigger.c_str()) == 0) {
                 std::cout << "Client " << sender_username << " wants a private chat!" << std::endl;
-                std::thread SpecificSenderThread(&Server::handleSecificMessageReceivers, this, sender_username, client_fd, buffer);
-                SpecificSenderThread.detach();
-                break;
+
+                char private_message_buffer[1024];
+                int  privatebytesReceived = recv(client_fd, private_message_buffer, sizeof(buffer) - 1, 0);
+                if ( privatebytesReceived <= 0 )
+                {
+                    if (privatebytesReceived == 0) {
+                        std::cout << "Client disconnected" << std::endl;
+                    }
+                    else {
+                        std::cerr << "Receive error: " << strerror(errno) << std::endl;
+                    }
+                    close(client_fd);
+
+                    {
+                        std::lock_guard<std::mutex> lock(clients_mutex);
+                        auto it =       connectedClients.begin();
+                        while ( it !=   connectedClients.end()) {
+                            if (it->    second.client_fd == client_fd) {
+                                it =    connectedClients.erase(it);
+                            }
+                            else {
+                                it++;
+                            }
+                        }
+                    }
+                    break;
+                } else {
+                    private_message_buffer[privatebytesReceived] = '\0';
+                    std::thread SpecificSenderThread(&Server::handleSecificMessageReceivers, this, sender_username, client_fd, private_message_buffer);
+                    SpecificSenderThread.detach();
+                    break;
+                }
             }
 
             std::cout <<"Client " << sender_username << " has sent: " << buffer << std::endl;
@@ -210,51 +239,29 @@ void Server::handleSecificMessageReceivers(string username, int client_fd, strin
     try {
         std::cout << "Received message: '"  << username  << "'" << std::endl;
         std::cout << "Private trigger: '"   << client_fd << "'" << std::endl;
-        std::cout << "Private trigger: '"   << target    << "'" << std::endl;
-
-        while (true) {
-            char     message[1024];
-            int      bytesReceived = recv(client_fd, message, sizeof(message) - 1, 0);
-            cout << "primili smo porukicu" << endl;
-            if (     bytesReceived <= 0 ) {
-                if ( bytesReceived == 0) {
-                     cout << "Client disconnected mid private chat..." << endl;
-                }
-                else {
-                    cerr << "Receive error: " << strerror(errno) << endl;
-                }
-                close(client_fd);
-                {
-                    std::lock_guard<std::mutex> lock(clients_mutex);
-                    auto it   =  connectedClients.begin();
-                    while (it != connectedClients.end()) {
-                        if(it->  second.client_fd == client_fd) {
-                           it =  connectedClients.erase(it);
+        std::cout << "Private message buffer: '"   << target    << "'" << std::endl;
+        
+        string target_receiver;
+        string delimiter = " : ";
+        size_t pos = target.find(delimiter);
+        target_receiver = target.substr(0, pos);
+        string message  = target.substr(pos + delimiter.length());
+            {
+                std::lock_guard<std::mutex>   lock(clients_mutex);
+                for(const auto &cli : connectedClients) {
+                    if (cli.first != username && cli.first == target_receiver) {
+                        string  combo_message =          username + " has privately sent u : " + message;
+                        ssize_t bytes_sent    =          send(cli.second.client_fd, combo_message.c_str(), combo_message.size(), 0);
+                        if (    bytes_sent    == -1) {
+                                cerr << "Failed to send private message to " << cli.first << ": " << strerror(errno) << endl;
                         }
                         else {
-                            ++it;
+                            cout << "Private message sent to client " << cli.first << " (fd: " << cli.second.client_fd << ")\n";
                         }
-                    }
-                }
-                break;
-            }
-            message[bytesReceived] = '\0';
-
-            std::lock_guard<std::mutex>   lock(clients_mutex);
-            for(const auto &cli : connectedClients) {
-                if (cli.first != username && cli.first == target) {
-                    string  combo_message =          username + " has privately sent u : " + message;
-                    ssize_t bytes_sent    =          send(cli.second.client_fd, combo_message.c_str(), combo_message.size(), 0);
-                    if (    bytes_sent    == -1) {
-                            cerr << "Failed to send private message to " << cli.first << ": " << strerror(errno) << endl;
-                    }
-                    else {
-                        cout << "Private message sent to client " << cli.first << " (fd: " << cli.second.client_fd << ")\n";
                     }
                 }
             }
         }
-    }
     catch (const exception e) {
         cerr << e.what() << endl;
         cout << " server receiver handler";
