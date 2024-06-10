@@ -22,7 +22,7 @@ Client::Client()
         if ((connect(client_fd, (struct sockaddr *)&client_addr, sizeof(client_addr))) < 0) {
             throw runtime_error(string("connection error: \n") + strerror(errno));
         }
-
+        cout <<                             "Enter username >> ";
         string                              username;
         cin >>                              username;
         uint32_t username_size =            htonl(username.size());
@@ -34,6 +34,7 @@ Client::Client()
 
         std::thread receiverThread(&Client::Receiver, this, client_fd);
         receiverThread.detach();
+
     }
     catch (const exception &e) {
         cerr << e.what() << endl;
@@ -69,37 +70,44 @@ void Client::Receiver(int client_fd)
         exit(EXIT_FAILURE);
     }
 }
-
 void Client::communicate(int client_fd)
 {
     try {
         while (true) {
-            char        message[1024];
-            char        target_username[256];
-            char        private_message[1024];
-            string      private_trigger = "/specify";
-            cin.getline(message, sizeof(message));
-            if (send(client_fd, message, strlen(message), 0) == -1)
-            {
-                cerr << "Failed to send message: " << strerror(errno) << endl;
-                break;
-            }
-           if (string(message) == private_trigger) {
-                cout << "Who do you want to write to?" << endl;
-                cin.getline(target_username, sizeof(target_username));
-                cout << "Say something to " << target_username << " : ";
-                cin.getline(private_message, sizeof(private_message));
-                string combo_private_message = string(target_username) + " : " + string(private_message);
-                cout << combo_private_message << endl;
+            char message[1024];
+            std::string private_trigger = "/specify";
+            std::cin.getline(message, sizeof(message));
+
+            if (std::string(message) == private_trigger) {
+                if (send(client_fd, message, strlen(message), 0) == -1) {
+                    std::cerr << "Failed to send private trigger: " << strerror(errno) << std::endl;
+                    break;
+                }
+
+                char target_username[256];
+                char private_message[1024];
+
+                std::cout << "Who do you want to write to? ";
+                std::cin.getline(target_username, sizeof(target_username));
+
+                std::cout << "Say something to " << target_username << ": ";
+                std::cin.getline(private_message, sizeof(private_message));
+
+                std::string combo_private_message = std::string(target_username) + " : " + std::string(private_message);
+                std::cout << "Private message: " << combo_private_message << std::endl;
+
                 if (send(client_fd, combo_private_message.c_str(), combo_private_message.length(), 0) == -1) {
-                    cerr << "Failed to send a private message to " << combo_private_message << endl;
+                    std::cerr << "Failed to send private message: " << strerror(errno) << std::endl;
+                    break;
+                }
+            } else {
+                if (send(client_fd, message, strlen(message), 0) == -1) {
+                    std::cerr << "Failed to send message: " << strerror(errno) << std::endl;
                     break;
                 }
             }
-            continue;
         }
-    }
-    catch (const exception e) {
-        cerr << e.what() << endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
     }
 }

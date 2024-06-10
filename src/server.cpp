@@ -88,8 +88,6 @@ void Server::handleConnections() {
             }
 
             cout << "Client " << username << " added with fd " << client_fd << endl;
-            cout << connectedClients.size() << endl;
-
             int  client_port = ntohs (client_address.sin_port);
             char client_ip[INET_ADDRSTRLEN];
             inet_ntop     (AF_INET, &(client_address.sin_addr), client_ip, INET_ADDRSTRLEN);
@@ -104,36 +102,48 @@ void Server::handleConnections() {
         return;
     }
 }
-void   Server::handleClientMessages(int client_fd) {
-    try {
-        while (true) {
-            char buffer[1024];
-            std::string private_trigger =       "/specify";
-            int  bytesReceived =                recv(client_fd, buffer, sizeof(buffer) - 1, 0);
 
+void Server::removeClient(int client_fd) {
+    std::lock_guard<std::mutex> lock(clients_mutex);
+    auto it =    connectedClients.begin();
+    while ( it != connectedClients.end()) {
+        if (it-> second.client_fd == client_fd) {
+            it = connectedClients.erase(it);
+        }
+        else {
+            it++;
+        }
+    }
+}  
+
+void Server::listAllUsers(int client_fd, string sender_username) {
+    string user;
+    for(const auto &cli : connectedClients) {
+        user = cli.first + "\n";
+        if(send(client_fd, user.c_str(), user.size(), 0) == -1) {
+            cerr << "Failed to send all users to the client...\n";
+        } else {
+            continue;
+        }
+   }
+}
+
+void Server::handleClientMessages(int client_fd) {
+     char buffer[1024];
+     try {
+        while (true) {
+            string private_trigger      =       "/specify";
+            string list_users_trigger   =       "/ls";
+            int  bytesReceived =                recv(client_fd, buffer, sizeof(buffer) - 1, 0);
             if ( bytesReceived <= 0 )
             {
                 if (bytesReceived == 0) {
                     std::cout << "Client disconnected" << std::endl;
-                }
-                else {
+                } else {
                     std::cerr << "Receive error: " << strerror(errno) << std::endl;
                 }
-
                 close(client_fd);
-
-                {
-                    std::lock_guard<std::mutex> lock(clients_mutex);
-                    auto it =    connectedClients.begin();
-                    while ( it != connectedClients.end()) {
-                        if (it-> second.client_fd == client_fd) {
-                            it = connectedClients.erase(it);
-                        }
-                        else {
-                            it++;
-                        }
-                    }
-                }
+                removeClient(client_fd);
                 break;
             }
 
@@ -160,12 +170,25 @@ void   Server::handleClientMessages(int client_fd) {
                 str.erase(str.find_last_not_of(" \n\r\t") + 1);
                 return str;
             };
-
             received_message = trim(received_message);
 
-            std::cout << "Received message: '"  <<        received_message << "'" <<                            std::endl;
-            std::cout << "Private trigger: '"   <<        private_trigger  << "'" <<                            std::endl;
-            std::cout << "Comparison result: "  << strcmp(received_message.c_str(), private_trigger.c_str()) << std::endl;
+            std::cout << "Received message: '"  <<        received_message   << "'" <<                         std::endl;
+            std::cout << "Private trigger: '"   <<        private_trigger    << "'" <<                         std::endl;
+            std::cout << "list_users_trigger: '"<<        list_users_trigger << "'" <<                         std::endl;
+            std::cout << "Comparison result: "  << strcmp(received_message.c_str(), private_trigger.c_str())<< std::endl;
+
+            if (strcmp(received_message.c_str(), list_users_trigger.c_str()) == 0) {
+                    cout << "Client wants list of all active users!\n";
+                    string userList_message = "\n*** Here is the list of all the active users ***\n";
+                    if (send(client_fd, userList_message.c_str(), userList_message.size(), 0) == -1) {
+                        cerr << "Failed to notify client about incoming usernames...\n" << strerror(errno);
+                    } else {
+                        std::lock_guard<std::mutex> lock(clients_mutex);
+                        std::thread usersListThread(&Server::listAllUsers, this, client_fd,sender_username);
+                        usersListThread.detach();
+                        continue;
+                    }
+                } 
 
             if (strcmp(received_message.c_str(), private_trigger.c_str()) == 0) {
                 std::cout << "Client " << sender_username << " wants a private chat!" << std::endl;
@@ -181,25 +204,13 @@ void   Server::handleClientMessages(int client_fd) {
                         std::cerr << "Receive error: " << strerror(errno) << std::endl;
                     }
                     close(client_fd);
-
-                    {
-                        std::lock_guard<std::mutex> lock(clients_mutex);
-                        auto it =       connectedClients.begin();
-                        while ( it !=   connectedClients.end()) {
-                            if (it->    second.client_fd == client_fd) {
-                                it =    connectedClients.erase(it);
-                            }
-                            else {
-                                it++;
-                            }
-                        }
-                    }
+                    removeClient(client_fd);
                     break;
                 } else {
                     private_message_buffer[privatebytesReceived] = '\0';
                     std::thread SpecificSenderThread(&Server::handleSecificMessageReceivers, this, sender_username, client_fd, private_message_buffer);
                     SpecificSenderThread.detach();
-                    break;
+                    continue;;
                 }
             }
 
@@ -235,6 +246,11 @@ void Server::handleMessageReceivers(string username, string message) {
     }
 }
 
+bool Server::findUser(string target_receiver) {
+    std::lock_guard<std::mutex> lock(clients_mutex); 
+    return connectedClients.find(target_receiver) != connectedClients.end();
+}
+
 void Server::handleSecificMessageReceivers(string username, int client_fd, string target) {
     try {
         std::cout << "Received message: '"  << username  << "'" << std::endl;
@@ -243,10 +259,10 @@ void Server::handleSecificMessageReceivers(string username, int client_fd, strin
         
         string target_receiver;
         string delimiter = " : ";
-        size_t pos = target.find(delimiter);
-        target_receiver = target.substr(0, pos);
-        string message  = target.substr(pos + delimiter.length());
-            {
+        size_t pos       = target.find(delimiter);
+        target_receiver  = target.substr(0, pos);
+        string message   = target.substr(pos + delimiter.length());
+            if(findUser(target_receiver)) {
                 std::lock_guard<std::mutex>   lock(clients_mutex);
                 for(const auto &cli : connectedClients) {
                     if (cli.first != username && cli.first == target_receiver) {
@@ -254,12 +270,17 @@ void Server::handleSecificMessageReceivers(string username, int client_fd, strin
                         ssize_t bytes_sent    =          send(cli.second.client_fd, combo_message.c_str(), combo_message.size(), 0);
                         if (    bytes_sent    == -1) {
                                 cerr << "Failed to send private message to " << cli.first << ": " << strerror(errno) << endl;
-                        }
-                        else {
-                            cout << "Private message sent to client " << cli.first << " (fd: " << cli.second.client_fd << ")\n";
+                        } else {
+                                cout << "Private message sent to client " << cli.first << " (fd: " << cli.second.client_fd << ")\n";
                         }
                     }
                 }
+                string acknowledgement = "Private message sent to " + target_receiver;
+                send(client_fd, acknowledgement.c_str(), acknowledgement.size(), 0);
+            } else {
+                string error = "There is no user " + target_receiver;
+                cout << error << endl;
+                send(client_fd, error.c_str(), error.size(), 0);
             }
         }
     catch (const exception e) {

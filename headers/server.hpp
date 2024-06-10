@@ -31,6 +31,9 @@ public:
     bool    isDataAvailable                (int client_fd, int timeout_sec, int timeout_usec);
     void    handleClientMessages           (int client_fd);
     string  addUser                        (string username);
+    bool    findUser                       (string username);
+    void    listAllUsers                   (int client_fd, string sender_username);
+    void    removeClient                   (int client_fd);
     void    handleMessageReceivers         (string username, string message);
     void    handleSecificMessageReceivers  (string username, int client_fd, string target);
 
